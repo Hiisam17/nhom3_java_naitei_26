@@ -2,6 +2,10 @@ package vn.naitei.nhom3.expensemanagement.service.impl;
 
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import vn.naitei.nhom3.expensemanagement.dto.expense.ExpenseMapper;
+import vn.naitei.nhom3.expensemanagement.dto.expense.ExpenseRequest;
+import vn.naitei.nhom3.expensemanagement.dto.expense.ExpenseResponse;
 import vn.naitei.nhom3.expensemanagement.entity.Category;
 import vn.naitei.nhom3.expensemanagement.entity.Expense;
 import vn.naitei.nhom3.expensemanagement.entity.User;
@@ -20,59 +24,73 @@ import java.util.List;
 public class ExpenseServiceImpl implements ExpenseService {
 
     private final ExpenseRepository expenseRepository;
-    private final UserRepository userRepository;
     private final CategoryRepository categoryRepository;
+    private final UserRepository userRepository;
 
     @Override
-    public List<Expense> getAllByUser(Long userId) {
-        return expenseRepository.findByUserId(userId);
+    @Transactional(readOnly = true)
+    public List<ExpenseResponse> getAllByUser(Long userId) {
+        return expenseRepository.findByUserId(userId).stream()
+                .map(ExpenseMapper::toResponse)
+                .toList();
     }
 
     @Override
-    public Expense getById(Long id) {
-        return expenseRepository.findById(id)
-                .orElseThrow(() -> ResourceNotFoundException.of("Expense", id));
+    @Transactional(readOnly = true)
+    public ExpenseResponse getById(Long userId, Long id) {
+        return ExpenseMapper.toResponse(findOwnedExpense(userId, id));
     }
 
     @Override
-    public Expense create(Long userId, Long categoryId, Expense expense) {
+    @Transactional
+    public ExpenseResponse create(Long userId, ExpenseRequest request) {
         User user = userRepository.findById(userId)
-                .orElseThrow(() -> ResourceNotFoundException.of("User", userId));
-        Category category = resolveExpenseCategory(userId, categoryId);
+                .orElseThrow(() -> ResourceNotFoundException.of("Người dùng", userId));
+        Category category = validateCategory(userId, request.getCategoryId());
+
+        Expense expense = new Expense();
         expense.setUser(user);
         expense.setCategory(category);
-        return expenseRepository.save(expense);
+        updateExpense(expense, request);
+
+        return ExpenseMapper.toResponse(expenseRepository.save(expense));
     }
 
     @Override
-    public Expense update(Long id, Long categoryId, Expense updated) {
-        Expense expense = getById(id);
-        if (categoryId != null) {
-            expense.setCategory(resolveExpenseCategory(expense.getUser().getId(), categoryId));
-        }
-        expense.setTitle(updated.getTitle());
-        expense.setAmount(updated.getAmount());
-        expense.setExpenseDate(updated.getExpenseDate());
-        expense.setNote(updated.getNote());
-        return expenseRepository.save(expense);
+    @Transactional
+    public ExpenseResponse update(Long userId, Long id, ExpenseRequest request) {
+        Expense expense = findOwnedExpense(userId, id);
+        Category category = validateCategory(userId, request.getCategoryId());
+
+        expense.setCategory(category);
+        updateExpense(expense, request);
+
+        return ExpenseMapper.toResponse(expenseRepository.save(expense));
     }
 
     @Override
-    public void delete(Long id) {
-        Expense expense = getById(id);
-        expenseRepository.delete(expense);
+    @Transactional
+    public void delete(Long userId, Long id) {
+        expenseRepository.delete(findOwnedExpense(userId, id));
     }
 
-    private Category resolveExpenseCategory(Long userId, Long categoryId) {
-        Category category = categoryRepository.findById(categoryId)
-                .orElseThrow(() -> ResourceNotFoundException.of("Category", categoryId));
-        boolean visibleToUser = category.getUser() == null || category.getUser().getId().equals(userId);
-        if (!visibleToUser) {
-            throw new BadRequestException("Danh mục không thuộc quyền sử dụng của User này");
-        }
-        if (category.getType() != CategoryType.EXPENSE) {
-            throw new BadRequestException("Danh mục không phải loại EXPENSE");
-        }
-        return category;
+    private Expense findOwnedExpense(Long userId, Long id) {
+        return expenseRepository.findById(id)
+                .filter(expense -> expense.getUser().getId().equals(userId))
+                .orElseThrow(() -> ResourceNotFoundException.of("Khoản chi", id));
+    }
+
+    private Category validateCategory(Long userId, Long categoryId) {
+        return categoryRepository.findVisibleToUserAndType(userId, CategoryType.EXPENSE).stream()
+                .filter(category -> category.getId().equals(categoryId))
+                .findFirst()
+                .orElseThrow(() -> new BadRequestException("Danh mục khoản chi không hợp lệ"));
+    }
+
+    private void updateExpense(Expense expense, ExpenseRequest request) {
+        expense.setTitle(request.getTitle().trim());
+        expense.setAmount(request.getAmount());
+        expense.setExpenseDate(request.getDate());
+        expense.setNote(request.getNote());
     }
 }

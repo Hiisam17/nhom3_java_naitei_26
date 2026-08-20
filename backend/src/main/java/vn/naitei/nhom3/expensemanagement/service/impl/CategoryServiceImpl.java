@@ -1,7 +1,11 @@
 package vn.naitei.nhom3.expensemanagement.service.impl;
 
-import lombok.RequiredArgsConstructor;
+import java.time.LocalDateTime;
+import java.util.List;
+
 import org.springframework.stereotype.Service;
+
+import lombok.RequiredArgsConstructor;
 import vn.naitei.nhom3.expensemanagement.entity.Category;
 import vn.naitei.nhom3.expensemanagement.entity.User;
 import vn.naitei.nhom3.expensemanagement.entity.enums.CategoryType;
@@ -9,9 +13,6 @@ import vn.naitei.nhom3.expensemanagement.exception.ResourceNotFoundException;
 import vn.naitei.nhom3.expensemanagement.repository.CategoryRepository;
 import vn.naitei.nhom3.expensemanagement.repository.UserRepository;
 import vn.naitei.nhom3.expensemanagement.service.CategoryService;
-
-import java.time.LocalDateTime;
-import java.util.List;
 
 @Service
 @RequiredArgsConstructor
@@ -21,18 +22,29 @@ public class CategoryServiceImpl implements CategoryService {
     private final UserRepository userRepository;
 
     @Override
+    public List<Category> getActiveSystemExpenseCategories() {
+        return categoryRepository.findByUserIsNullAndTypeAndDeletedAtIsNullOrderByIdAsc(
+                CategoryType.EXPENSE);
+    }
+
+    @Override
     public List<Category> getVisibleToUser(Long userId) {
-        return categoryRepository.findVisibleToUser(userId);
+        return categoryRepository.findVisibleToUser(userId).stream()
+                .filter(category -> category.getDeletedAt() == null)
+                .toList();
     }
 
     @Override
     public List<Category> getVisibleToUserByType(Long userId, CategoryType type) {
-        return categoryRepository.findVisibleToUserAndType(userId, type);
+        return categoryRepository.findVisibleToUserAndType(userId, type).stream()
+                .filter(category -> category.getDeletedAt() == null)
+                .toList();
     }
 
     @Override
     public Category getById(Long id) {
         return categoryRepository.findById(id)
+                .filter(category -> category.getDeletedAt() == null)
                 .orElseThrow(() -> ResourceNotFoundException.of("Category", id));
     }
 
